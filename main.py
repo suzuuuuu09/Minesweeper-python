@@ -80,23 +80,27 @@ mines = []
 # マインの配置
 mine_count = 40  # Easyの場合のマインの数
 if window_size == (400, 400):  # Normal
-    mine_count = 60
+    mine_count = 70
 elif window_size == (500, 500):  # Hard
-    mine_count = 80
+    mine_count = 100
 
-while len(mines) < mine_count:
-    x = random.randint(0, num_cells_width - 1)
-    y = random.randint(0, num_cells_height - 1)
-    if (x, y) not in mines:
-        mines.append((x, y))
-        field[y][x] = -1
+mines_placed = False  # ゲーム開始時にはマインは配置されていない
 
-        # 周囲のセルの数を更新
-        for dx in range(-1, 2):
-            for dy in range(-1, 2):
-                nx, ny = x + dx, y + dy
-                if 0 <= nx < num_cells_width and 0 <= ny < num_cells_height and field[ny][nx] != -1:
-                    field[ny][nx] += 1
+def place_mines(first_click_pos, mine_count, num_cells_width, num_cells_height):
+    mines = []
+    while len(mines) < mine_count:
+        x = random.randint(0, num_cells_width - 1)
+        y = random.randint(0, num_cells_height - 1)
+        if (x, y) != first_click_pos and (x, y) not in mines:
+            mines.append((x, y))
+            field[y][x] = -1
+
+            # 周囲のセルの数を更新
+            for dx in range(-1, 2):
+                for dy in range(-1, 2):
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < num_cells_width and 0 <= ny < num_cells_height and field[ny][nx] != -1:
+                        field[ny][nx] += 1
 
 # 数字ごとの色の定義
 number_colors = {
@@ -122,18 +126,38 @@ tile_image = pygame.transform.scale(tile_image, (cell_size, cell_size))
 flag_image = pygame.image.load('img/flag.png').convert_alpha()
 flag_image = pygame.transform.scale(flag_image, (cell_size, cell_size))
 
-# ゲーム開始時のタイムスタンプを取得
+# ゲーム開始時のタイムスタンプと経過時間の固定値を保持する変数を定義
 start_time = time.time()
+fixed_elapsed_time = None  # 爆弾を踏んだ時点の経過時間を保持する変数
 
 def open_cell(x, y):
+    global mines_placed, fixed_elapsed_time
+    if not mines_placed:
+        place_mines((x, y), mine_count, num_cells_width, num_cells_height)
+        mines_placed = True
     if 0 <= x < num_cells_width and 0 <= y < num_cells_height:
         if not opened[y][x] and not flags[y][x]:
             opened[y][x] = True
-            if field[y][x] == 0:
+            if field[y][x] == -1:  # 爆弾がある場合
+                reveal_all_mines()  # すべての爆弾を表示する関数を呼び出す
+                fixed_elapsed_time = int(time.time() - start_time)  # 爆弾を踏んだ時点の経過時間を固定
+            elif field[y][x] == 0:
                 for dx in range(-1, 2):
                     for dy in range(-1, 2):
                         if dx != 0 or dy != 0:
                             open_cell(x + dx, y + dy)
+
+def reveal_all_mines():
+    global fixed_elapsed_time  # グローバル変数を関数内で使用する宣言
+    for y in range(num_cells_height):
+        for x in range(num_cells_width):
+            opened[y][x] = True  # すべてのセルを開く
+            if field[y][x] == -1:  # セルが爆弾を含む場合
+                # 爆弾のあるセルの背景を赤くする
+                rect = pygame.Rect(x*cell_size, y*cell_size, cell_size, cell_size)
+                pygame.draw.rect(screen, (255, 0, 0), rect)
+    # 爆弾を踏んだ時点の経過時間を固定
+    fixed_elapsed_time = int(time.time() - start_time)
 
 # ゲームループ
 running = True
@@ -179,8 +203,11 @@ while running:
                     text_rect = text.get_rect(center=rect.center)
                     screen.blit(text, text_rect)
 
-    # 経過時間の計算
-    elapsed_time = int(time.time() - start_time)
+    # 経過時間の計算（爆弾を踏んでいない場合は現在の経過時間を計算し、踏んだ場合は固定された経過時間を使用）
+    if fixed_elapsed_time is None:
+        elapsed_time = int(time.time() - start_time)
+    else:
+        elapsed_time = fixed_elapsed_time
 
     # 残りの旗の数の計算
     remaining_flags = mine_count - sum(flags[y][x] for y in range(num_cells_height) for x in range(num_cells_width))
@@ -190,7 +217,8 @@ while running:
     font = pygame.font.Font(None, 36)
 
     # 経過時間の表示（左上）
-    elapsed_text = font.render(f'Time: {elapsed_time}', True, WHITE)
+    minutes, seconds = divmod(elapsed_time, 60)
+    elapsed_text = font.render(f'Time: {minutes:02d}:{seconds:02d}', True, WHITE)
     screen.blit(elapsed_text, (10, 10))
     
     # 残りの旗の数の表示（右上）
@@ -201,5 +229,4 @@ while running:
     pygame.display.flip()
 
 pygame.quit()
-sys.exit()
-
+sys.exit
