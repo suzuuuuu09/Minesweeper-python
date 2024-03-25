@@ -36,11 +36,11 @@ def select_difficulty():
                 x, y = pygame.mouse.get_pos()
                 if 50 <= x <= 250:
                     if 30 <= y <= 60:
-                        return 30  # Easy
+                        return (300, 300)  # Easy
                     elif 80 <= y <= 110:
-                        return 60  # Normal
+                        return (400, 400)  # Normal
                     elif 130 <= y <= 160:
-                        return 90  # Hard
+                        return (500, 500)  # Hard
             elif event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
@@ -53,30 +53,37 @@ WHITE = (255, 255, 255)
 GRAY = (192, 192, 192)
 
 # 難易度選択
-mine_count = select_difficulty()
+window_size = select_difficulty()
 
 # 難易度選択後にウィンドウサイズを変更
-pygame.display.set_mode((600, 600))
+pygame.display.set_mode(window_size)
 
 # ゲームの初期設定
-size = width, height = 800, 600
-screen = pygame.display.set_mode(size)
+screen = pygame.display.set_mode(window_size)
 pygame.display.set_caption('マインスイーパー')
 
 # ゲームの設定
 cell_size = 20
-num_cells_width = width // cell_size
-num_cells_height = height // cell_size
+num_cells_width = window_size[0] // cell_size
+num_cells_height = window_size[1] // cell_size
 
 # 背景画像の読み込みとスケール
-tile_bg_image = pygame.image.load('img/tile-bg.png')
+tile_bg_image = pygame.image.load('img/tile-bg.png').convert()
 tile_bg_image = pygame.transform.scale(tile_bg_image, (cell_size, cell_size))
 
 # マインフィールドの生成
 field = [[0 for x in range(num_cells_width)] for y in range(num_cells_height)]
+opened = [[False for x in range(num_cells_width)] for y in range(num_cells_height)]  # 各セルの開閉状態を追跡
+flags = [[False for x in range(num_cells_width)] for y in range(num_cells_height)]  # 各セルのフラグマーク状態を追跡
 mines = []
 
 # マインの配置
+mine_count = 40  # Easyの場合のマインの数
+if window_size == (400, 400):  # Normal
+    mine_count = 60
+elif window_size == (500, 500):  # Hard
+    mine_count = 80
+
 while len(mines) < mine_count:
     x = random.randint(0, num_cells_width - 1)
     y = random.randint(0, num_cells_height - 1)
@@ -107,8 +114,26 @@ number_colors = {
 bomb_image = pygame.image.load('img/bomb.png')
 bomb_image = pygame.transform.scale(bomb_image, (cell_size, cell_size))  # セルサイズに合わせてスケール
 
+# タイル画像の読み込みとスケール
+tile_image = pygame.image.load('img/tile.png')
+tile_image = pygame.transform.scale(tile_image, (cell_size, cell_size))
+
+# フラグ画像の読み込みとスケール（透過処理の確認）
+flag_image = pygame.image.load('img/flag.png').convert_alpha()
+flag_image = pygame.transform.scale(flag_image, (cell_size, cell_size))
+
 # ゲーム開始時のタイムスタンプを取得
 start_time = time.time()
+
+def open_cell(x, y):
+    if 0 <= x < num_cells_width and 0 <= y < num_cells_height:
+        if not opened[y][x] and not flags[y][x]:
+            opened[y][x] = True
+            if field[y][x] == 0:
+                for dx in range(-1, 2):
+                    for dy in range(-1, 2):
+                        if dx != 0 or dy != 0:
+                            open_cell(x + dx, y + dy)
 
 # ゲームループ
 running = True
@@ -116,6 +141,20 @@ while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            x, y = pygame.mouse.get_pos()
+            cell_x, cell_y = x // cell_size, y // cell_size
+            if event.button == 1:  # 左クリック
+                if not flags[cell_y][cell_x]:  # フラグがない場合のみ開く
+                    open_cell(cell_x, cell_y)  # 再帰的にセルを開く
+            elif event.button == 3:  # 右クリック
+                # 残りの旗の数を計算
+                remaining_flags = mine_count - sum(flags[y][x] for y in range(num_cells_height) for x in range(num_cells_width))
+                remaining_flags = max(0, remaining_flags)  # 残りの旗の数がマイナスにならないようにする
+                if not opened[cell_y][cell_x] and not flags[cell_y][cell_x] and remaining_flags > 0:  # 旗を置く
+                    flags[cell_y][cell_x] = True
+                elif flags[cell_y][cell_x]:  # 旗を取り除く
+                    flags[cell_y][cell_x] = False
 
     screen.fill(BLACK)
 
@@ -123,22 +162,29 @@ while running:
     for y in range(num_cells_height):
         for x in range(num_cells_width):
             rect = pygame.Rect(x*cell_size, y*cell_size, cell_size, cell_size)
-            screen.blit(tile_bg_image, rect.topleft)  # 背景画像の描画
-
-            # マインまたは数字の描画
-            if field[y][x] == -1:
-                screen.blit(bomb_image, rect.topleft)
-            elif field[y][x] > 0:
-                font = pygame.font.Font(None, 24)
-                text = font.render(str(field[y][x]), True, number_colors[field[y][x]])
-                text_rect = text.get_rect(center=rect.center)
-                screen.blit(text, text_rect)
+            if not opened[y][x]:  # セルが閉じている場合
+                screen.blit(tile_bg_image, rect.topleft)  # 背景画像を描画
+                screen.blit(tile_image, rect.topleft)  # tile.pngを常に表示
+                if flags[y][x]:  # フラグが置かれている場合
+                    screen.blit(flag_image, rect.topleft)  # flag.pngをtile.pngの上に表示
+            else:
+                # セルが開かれた場合でも背景画像を描画
+                screen.blit(tile_bg_image, rect.topleft)
+                
+                if field[y][x] == -1:  # セルが爆弾を含む場合
+                    screen.blit(bomb_image, rect.topleft)
+                elif field[y][x] > 0:  # セルが数字を含む場合
+                    font = pygame.font.Font(None, 24)
+                    text = font.render(str(field[y][x]), True, number_colors[field[y][x]])
+                    text_rect = text.get_rect(center=rect.center)
+                    screen.blit(text, text_rect)
 
     # 経過時間の計算
     elapsed_time = int(time.time() - start_time)
 
-    # 残りの爆弾の数（ここでは単純にmine_countを使用）
-    remaining_mines = mine_count
+    # 残りの旗の数の計算
+    remaining_flags = mine_count - sum(flags[y][x] for y in range(num_cells_height) for x in range(num_cells_width))
+    remaining_flags = max(0, remaining_flags)  # 残りの旗の数がマイナスにならないようにする
 
     # 情報表示用のフォント設定
     font = pygame.font.Font(None, 36)
@@ -146,11 +192,11 @@ while running:
     # 経過時間の表示（左上）
     elapsed_text = font.render(f'Time: {elapsed_time}', True, WHITE)
     screen.blit(elapsed_text, (10, 10))
-
-    # 残りの爆弾の数の表示（右上）
-    mines_text = font.render(f'Mines: {remaining_mines}', True, WHITE)
-    mines_text_rect = mines_text.get_rect(topright=(width - 10, 10))
-    screen.blit(mines_text, mines_text_rect)
+    
+    # 残りの旗の数の表示（右上）
+    flags_text = font.render(f'Flags: {remaining_flags}', True, WHITE)
+    flags_text_rect = flags_text.get_rect(topright=(window_size[0] - 10, 10))
+    screen.blit(flags_text, flags_text_rect)
 
     pygame.display.flip()
 
